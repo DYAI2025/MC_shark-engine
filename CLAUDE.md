@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Shark Engine is a Minecraft 1.21.1 Fabric mod that lets players build, assemble, and pilot flying vehicles. Players place a Steering Wheel, attach blocks (including Thrusters), and launch controllable airships with physics-based flight. Currently at MVP stage (v0.0.1) with the AIR vehicle class functional.
+Shark Engine is a Minecraft 1.21.1 Fabric mod that lets players build, assemble, and pilot flying vehicles. Players place a Steering Wheel, attach blocks (including a `bug` block that sets the ship's facing, and role-tagged parts like Thrusters), and launch controllable airships with physics-based flight. Currently at MVP stage (v0.0.1): the AIR vehicle class's airship loop is functional; an in-progress aircraft-extension (see Key Resources) adds a role-based part system (mass/lift/thrust/drag per block) and new helicopter parts (rotor hub/blade, helicopter engine, landing skid) as the next playable slice.
 
 The repo root also holds deployment and publishing tooling around the mod itself — see [Root-Level Tooling](#root-level-tooling).
 
@@ -53,6 +53,9 @@ This is enforced by Loom's `splitEnvironmentSourceSets()`. Putting client import
 | `dev.sharkengine.content` | Block/item/entity/sound/tag registries (`ModBlocks`, `ModEntities`, etc.) |
 | `dev.sharkengine.content.block` | Block & item classes (`SteeringWheelBlock`, `SteeringWheelItem`) |
 | `dev.sharkengine.ship` | Core vehicle logic — entity, physics, assembly, fuel, weight, acceleration |
+| `dev.sharkengine.ship.part` | Role-based vehicle part system — `VehiclePartRegistry`, `VehicleBalance`, `PartRole`, `VehiclePartDefinition`, `ShipPartAnalyzer`/`ShipStats` (see Core Systems) |
+| `dev.sharkengine.datagen` | Datagen providers (`SharkEngineDataGenerator` + recipe/loot/model/tag/lang providers) — see datagen gotcha above |
+| `dev.sharkengine.gametest` | `@GameTest` classes — must be registered in `fabric.mod.json`'s `fabric-gametest` array (see gotcha above) |
 | `dev.sharkengine.net` | Client-server networking payloads and handlers |
 | `dev.sharkengine.tutorial` | Onboarding popup flow and stage management |
 | `dev.sharkengine.client` | Client entrypoint, input handler, camera, blueprint sync |
@@ -62,11 +65,15 @@ This is enforced by Loom's `splitEnvironmentSourceSets()`. Putting client import
 
 ### Core Systems
 
-**Ship Assembly** (`ShipAssemblyService`): BFS scan from Steering Wheel finds connected `ship_eligible`-tagged blocks. Constraints: min 4 blocks adjacent to wheel, at least 1 Thruster, no terrain contact, max 512 blocks, max 32-block radius. Produces a `ShipBlueprint`.
+**Ship Assembly** (`ShipAssemblyService`): BFS scan from Steering Wheel finds connected `ship_eligible`-tagged blocks. Constraints: min 4 blocks adjacent to wheel, at least 1 Thruster (propulsion role — no longer directional), exactly 1 `bug` block (the ship's bow marker) sitting on the structure's outer edge, no terrain contact, max 512 blocks, max 32-block radius. Produces a `ShipBlueprint`.
+
+**Ship direction** (`BugBlock` + `ShipAssemblyService.directionToYaw()`): the `bug` block's `FACING` state is the *sole* source of a ship's forward yaw at launch (SOUTH=0°, WEST=90°, NORTH=180°, EAST=-90°) — thrusters contribute thrust but have no directional authority. `ShipTransform.rotateOffset()` (pure math, no MC types) is the single rotation authority shared by collision (`ShipPhysics`), disassembly, and rendering so all three agree on orientation (AIR-010) — before it existed, offsets were only ever rotated for rendering, so a ship could visually launch rotated while colliding/demounting against its un-rotated build footprint.
+
+**Vehicle Parts** (`dev.sharkengine.ship.part`): every placed block resolves to a `VehiclePartDefinition` (role + mass/lift/thrust/drag/fuelCapacity) via `VehiclePartRegistry`, backed by the balance table in `VehicleBalance` (source of truth: `sharkengine/docs/AIRCRAFT_CONCEPT_V2.md` §4). `ShipPartAnalyzer.analyze()` sums a structure's block ids into one `ShipStats` — this is now the *only* source of ship mass (AIR-023), replacing the deleted `ThrusterRequirements` class and any block-count-based weight approximation. To add a new placeable part, add a row to `VehicleBalance` rather than touching assembly/physics code directly; the registry has no Fabric/Minecraft dependency, so it (and `ShipPartAnalyzer`) run as plain unit tests.
 
 **Entity `interact()` on large-hitbox vehicles must PASS on a non-empty hand.** `ShipEntity`'s hitbox spans the whole assembled structure (up to the 32-block radius above), so any entity-level `interact()` override on it — or on any future large-hitbox vehicle entity — intercepts right-clicks *before* vanilla's normal block-placement path ever runs. Returning `CONSUME` unconditionally (e.g. for a generic "mount the pilot" fallback) silently defeats block placement anywhere on/near the vehicle, with zero exceptions logged — exactly what happened in `ShipEntity.interact()` until the 2026-07-13 fix (`ShipEntity.java`, see the fix's inline comment): every right-click holding a `ship_eligible` block near an already-launched ship got mounted-and-consumed instead of placing. Rule: only consume/handle when `player.getItemInHand(hand).isEmpty()`; otherwise return `InteractionResult.PASS` so vanilla gets a chance at normal item-use/placement (same pattern as right-clicking a vanilla boat while holding a block).
 
-**Physics** (`ShipEntity` + `ShipPhysics`): Weight categories (LIGHT 1-20, MEDIUM 21-40, HEAVY 41-60, OVERLOADED 61+) determine max speed. Five `AccelerationPhase` stages ramp speed from 5 to 30 blocks/sec over 6 seconds. Height penalty reduces performance above Y=100.
+**Physics** (`ShipEntity` + `ShipPhysics`): Weight categories (LIGHT 1-20, MEDIUM 21-40, HEAVY 41-60, OVERLOADED 61+) are computed from summed per-part mass (`ShipPartAnalyzer`), not block count, and determine max speed. Five `AccelerationPhase` stages ramp speed from 5 to 30 blocks/sec over 6 seconds. Height penalty reduces performance above Y=100.
 
 **Fuel** (`FuelSystem`): 100 energy max, 1 wood = 100 energy, consumption 1-3 units/sec by phase. Critical at <20%.
 
@@ -80,14 +87,18 @@ All validation and physics run server-side. The client handles input capture (`H
 
 ## Testing
 
-JUnit 5 tests in `src/test/java/dev/sharkengine/ship/`:
+JUnit 5 tests in `src/test/java/dev/sharkengine/ship/` (and `ship/part/`):
 - `ShipPhysicsTest` — Speed calculation, height penalty, acceleration phases
+- `AccelerationPhaseTest` — Phase boundaries and monotonicity
 - `ShipAssemblyServiceTest` — BFS assembly, validation, contact detection
+- `ShipTransformTest` — Offset rotation math shared by collision/disassembly/rendering (AIR-010)
+- `WeightCategoryTest` / `WeightConsistencyTest` — Weight-category thresholds and client/server mass agreement
 - `FuelSystemTest` — Fuel conversions, flight time, display formatting
 - `BuilderValidationTest` — Build-mode/assembly validation conditions
-- `ResourceValidationTest` — Validates resource files (lang, tags) against expected content
+- `ResourceValidationTest` — Validates resource files (lang, tags, generated asset-gen textures) against expected content
+- `part/AssemblyIssueTest`, `part/ShipPartAnalyzerTest`, `part/VehicleBalanceTest`, `part/VehiclePartRegistryTest` — Role-based part system: mass/lift/thrust aggregation and block-id resolution
 
-Tests use `@DisplayName` tied to gameplay behavior. Mock Fabric abstractions where needed.
+Tests use `@DisplayName` tied to gameplay behavior. Fabric/Minecraft types are mocked with hand-written shim classes under `src/test/java/net/minecraft/...` (mirroring the real package names — `BlockPos`, `BlockState`, `VoxelShape`, etc.) rather than a full game environment; this is what lets the `ship.part` classes run as plain unit tests with no Fabric bootstrap.
 
 ## Debugging "nothing happens" reports
 
@@ -105,7 +116,8 @@ GitHub Actions:
 - `src/main/resources/data/sharkengine/tags/block/ship_eligible.json` — Blocks allowed in ship structures (note: singular `block`, not `blocks`)
 - `src/main/resources/assets/sharkengine/lang/en_us.json` — All translatable strings
 - `MSP-1.md` (repo root) — Current milestone plan (guided builder + flight loop)
-- `docs/PRODUCTION_MVP_TASKS.md` (repo root) — Full production backlog and gap analysis; flags that flight is still 2D-ish (no true 6DoF), block-count-only weight model (no per-block mass), and no persistent vehicle-class buffs
+- `sharkengine/docs/PRODUCTION_MVP_TASKS.md` — Full production backlog and gap analysis; still flags flight as 2D-ish (no true 6DoF pitch/roll control) as an open gap, but its block-count-only weight model claim is now outdated — per-part mass (AIR-023, see Vehicle Parts above) replaced that.
+- `sharkengine/docs/AIRCRAFT_CONCEPT_V2.md` + `sharkengine/docs/plans/aircraft-extension-implementation.md` — Living design docs for the in-progress aircraft/helicopter parts extension (role-based parts, new blocks, first playable slice = a craftable helicopter within the existing AIR vehicle class). The bug-ledger in `AIRCRAFT_CONCEPT_V2.md` is dated 2026-07-12 and is already partially stale against current code (e.g. its B2 collision-rotation defect is fixed — see `ShipTransform` above) — verify a status marker against `src/main/java/dev/sharkengine/ship/` before trusting it.
 - `sharkengine/specs/001-vertikale-bewegung/` — Feature spec for the AIR flight-physics system (acceleration phases, weight/speed categories, fuel, height penalty). Its own `state.yaml`/`README.md` status tracker is stale (marks itself pending/in-progress) — don't trust it over the actual code in `src/main/java/dev/sharkengine/ship/`, which has these systems implemented.
 
 ## Coding Conventions
@@ -126,5 +138,7 @@ The repo root contains mod-deployment and publishing tooling outside the Gradle 
 - **`/test-server`** — Rebuilds and restarts the Dockerized Minecraft test server (container `sharkengine-server`, host port 25566), using the root `Dockerfile` and `server/server.properties`.
 
 **Modrinth publishing**: `tools/modrinth-mcp-server/` is a Node/TypeScript MCP server (registered in root `.mcp.json` as `modrinth`) exposing search/version/publish tools against the Modrinth API — used to search Modrinth and publish mod releases. Requires `MODRINTH_TOKEN` env var for write operations (create version, modify project).
+
+**Asset generation**: `tools/asset-gen/` is a Python pixel-art texture pipeline for aircraft-extension parts (`generate.py`, `palette.json`, `parts/`) — textures are drawn programmatically, not hand-pixeled, so regeneration is diff-stable and style-consistent. Every color must come from `palette.json`; `ResourceValidationTest` fails CI if a generated texture uses an off-palette color.
 
 **Note on `sharkengine/CLAUDE.md`**: that file and `sharkengine/.claude/` are a vendored generic "Spec-Flow" agent-workflow scaffold (unrelated `/feature`, `/epic`, `/ship` slash-command SDLC tooling), not documentation of this mod. Don't confuse its instructions with this file's.
