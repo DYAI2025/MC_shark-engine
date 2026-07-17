@@ -1,0 +1,100 @@
+plugins {
+    id "java"
+    id "maven-publish"
+    id "fabric-loom" version "1.7-SNAPSHOT"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${project.fabric_loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+    testImplementation "org.junit.jupiter:junit-jupiter-api:5.10.2"
+    testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:5.10.2"
+}
+
+loom {
+    splitEnvironmentSourceSets()
+
+    mods {
+        sharkengine {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+
+    runs {
+        gametest {
+            inherit server
+            name "Game Test"
+            vmArg "-Dfabric-api.gametest"
+            vmArg "-Dfabric-api.gametest.report-file=${project.layout.buildDirectory.get()}/junit.xml"
+            runDir "build/gametest"
+        }
+    }
+}
+
+// AIR-030: generates src/main/generated/{data,assets}/sharkengine/** via the
+// dev.sharkengine.datagen.SharkEngineDataGenerator fabric-datagen entrypoint.
+// Ground-truthed against the pinned Loom 1.7-SNAPSHOT plugin (decompiled
+// FabricApiExtension.configureDataGeneration): output dir defaults to
+// "src/main/generated" and is auto-registered as an extra `main` resources
+// source dir; the run config is named "datagen" so the CLI task is
+// `runDatagen` (Loom's run-task naming: "run" + capitalize(configName), same
+// convention as this project's existing `runGametest`). No "client" flag
+// exists on DataGenerationSettings in this Loom version — datagen always
+// inherits the `server` run (main source set only), which is fine here
+// because net.minecraft.data.models.* (BlockModelGenerators/ModelProvider,
+// used for block/item models) lives in the merged "common" Minecraft jar,
+// not the client-only one.
+fabricApi {
+    configureDataGeneration()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    options.encoding = "UTF-8"
+}
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+    withSourcesJar()
+}
+
+test {
+    useJUnitPlatform()
+}
+
+processResources {
+    inputs.property "version", project.version
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+}
+
+// runGametest boots a real GameTestServer, which refuses to start without EULA
+// acceptance in its run dir. Auto-accept for this local/CI dev-tooling run only
+// (does not affect the mod's own deployed server config, e.g. server/server.properties).
+tasks.register("acceptGametestEula") {
+    doLast {
+        def eulaFile = layout.projectDirectory.file("build/gametest/eula.txt").asFile
+        eulaFile.parentFile.mkdirs()
+        eulaFile.text = "eula=true\n"
+    }
+}
+
+tasks.named("runGametest") {
+    dependsOn tasks.named("acceptGametestEula")
+}

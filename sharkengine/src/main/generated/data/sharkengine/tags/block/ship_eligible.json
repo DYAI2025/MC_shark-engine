@@ -1,0 +1,34 @@
+{
+  "values": [
+    "sharkengine:steering_wheel",
+    {
+      "id": "#minecraft:planks",
+      "required": false
+    },
+    {
+      "id": "#minecraft:logs",
+      "required": false
+    },
+    {
+      "id": "#minecraft:wooden_slabs",
+      "required": false
+    },
+    {
+      "id": "#minecraft:wooden_stairs",
+      "required": false
+    },
+    {
+      "id": "#minecraft:wool",
+      "required": false
+    },
+    "minecraft:glass",
+    "sharkengine:thruster",
+    "sharkengine:bug",
+    "sharkengine:airframe_panel",
+    "sharkengine:fuselage_frame",
+    "sharkengine:helicopter_engine",
+    "sharkengine:rotor_hub",
+    "sharkengine:rotor_blade",
+    "sharkengine:landing_skid"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+    "schemaVersion": 1,
+    "id": "sharkengine",
+    "version": "${version}",
+    "name": "Shark Engine",
+    "description": "MVP moving ship contraption prototype",
+    "authors": [
+        "dyai"
+    ],
+    "license": "MIT",
+    "environment": "*",
+    "entrypoints": {
+        "main": [
+            "dev.sharkengine.SharkEngineModEntrypoint"
+        ],
+        "client": [
+            "dev.sharkengine.client.SharkEngineClient"
+        ],
+        "fabric-gametest": [
+            "dev.sharkengine.gametest.AssemblySmokeTest",
+            "dev.sharkengine.gametest.BlueprintPersistenceGameTest",
+            "dev.sharkengine.gametest.BuilderPreviewPayloadGameTest",
+            "dev.sharkengine.gametest.AirframePanelGameTest",
+            "dev.sharkengine.gametest.FuselageFrameGameTest",
+            "dev.sharkengine.gametest.HelicopterEngineGameTest",
+            "dev.sharkengine.gametest.RotorHubGameTest",
+            "dev.sharkengine.gametest.RotorBladeGameTest",
+            "dev.sharkengine.gametest.LandingSkidGameTest",
+            "dev.sharkengine.gametest.ShipEntityMountGameTest"
+        ],
+        "fabric-datagen": [
+            "dev.sharkengine.datagen.SharkEngineDataGenerator"
+        ]
+    },
+    "depends": {
+        "minecraft": "1.21.1",
+        "fabricloader": ">=0.16.5",
+        "fabric-api": "*"
+    }
+}

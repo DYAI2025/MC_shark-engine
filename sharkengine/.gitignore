@@ -1,0 +1,31 @@
+# Spec-Flow
+.spec-flow/memory/interaction-state.yaml
+.spec-flow/memory/state.yaml
+epics/
+
+# Build
+build/
+.gradle/
+logs/
+
+# AIR-030: datagen incremental hash cache (Fabric Loom excludes this from the
+# jar itself via `jar.exclude(".cache/**")`) — the actual generated
+# data/assets under src/main/generated ARE committed, this metadata isn't.
+src/main/generated/.cache/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+run/
+test-result.txt
+# Spec-Flow Feature specs (nicht ignorieren)
