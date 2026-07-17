@@ -4,6 +4,13 @@ FROM eclipse-temurin:21-jdk AS builder
 WORKDIR /build
 COPY sharkengine/ ./
 
+# ResourceValidationTest's AIR-032 palette-conformance checks read
+# tools/asset-gen/palette.json via a "../" relative path (single source of
+# truth shared with the Python texture generator — see that file's header).
+# The gradle test working dir is /build, so the sibling copy must land at
+# /tools/asset-gen/palette.json, not under /build.
+COPY tools/asset-gen/palette.json /tools/asset-gen/palette.json
+
 RUN chmod +x gradlew && ./gradlew --no-daemon build \
     && find build/libs -type f -name '*-sources.jar' -delete
 
